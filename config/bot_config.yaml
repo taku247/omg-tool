@@ -1,0 +1,111 @@
+# アービトラージBot設定ファイル
+
+# 開発・デバッグ設定
+development_mode: true              # 開発環境フラグ（本番環境ではfalse）
+
+# 監視対象シンボル
+symbols:
+  - "BTC/USDT"
+  - "ETH/USDT"
+  - "SOL/USDT"
+  - "XEM/USDT"
+
+# アービトラージ検出設定
+arbitrage:
+  # 価格差検出閾値
+  min_spread_threshold: 0.1        # 最小スプレッド閾値 (%) - メイン監視用
+  conservative_threshold: 0.05     # 保守的閾値 (%) - 高頻度取引用
+  aggressive_threshold: 0.2        # 積極的閾値 (%) - 安全重視用
+  test_threshold: 0.5              # テスト用閾値 (%)
+  
+  # ポジション・利益設定
+  max_position_size: 10000         # 最大ポジションサイズ (USD)
+  min_profit_threshold: 10         # 最小利益閾値 (USD)
+  
+  # 監視設定
+  monitoring_duration: 30          # 監視時間 (秒) - テスト用
+  price_update_display_limit: 10   # 価格更新表示件数制限
+  arbitrage_display_limit: 5       # アービトラージ機会表示件数制限
+
+# リスク管理設定
+risk:
+  max_position_size: 10000         # 最大ポジションサイズ (USD)
+  max_total_exposure: 50000        # 最大総エクスポージャー (USD)
+  max_positions_per_symbol: 3      # シンボルあたり最大ポジション数
+  max_total_positions: 10          # 総最大ポジション数
+  max_slippage_percentage: 0.5     # 最大スリッページ (%)
+  min_net_spread: 0.2              # 最小純スプレッド (%)
+  max_position_duration: 86400     # 最大ポジション保有時間 (秒)
+  cooldown_period: 300             # クールダウン期間 (秒)
+  max_daily_loss: 1000             # 最大日次損失 (USD)
+  max_drawdown: 5000               # 最大ドローダウン (USD)
+  stop_loss_percentage: 2.0        # ストップロス (%)
+  max_exchange_exposure: 20000     # 取引所あたり最大エクスポージャー (USD)
+  min_exchange_balance: 1000       # 最小残高要件 (USD)
+
+# 取引所設定（環境変数で上書き）
+exchanges:
+  hyperliquid:
+    testnet: false
+    api_key: ${HYPERLIQUID_API_KEY}
+    api_secret: ${HYPERLIQUID_API_SECRET}
+    
+  bybit:
+    testnet: false
+    api_key: ${BYBIT_API_KEY}
+    api_secret: ${BYBIT_API_SECRET}
+    
+  bitget:
+    testnet: false
+    api_key: ${BITGET_API_KEY}
+    api_secret: ${BITGET_API_SECRET}
+    
+  gate:
+    testnet: false
+    api_key: ${GATE_API_KEY}
+    api_secret: ${GATE_API_SECRET}
+    
+  kucoin:
+    testnet: false
+    api_key: ${KUCOIN_API_KEY}
+    api_secret: ${KUCOIN_API_SECRET}
+    passphrase: ${KUCOIN_PASSPHRASE}
+
+# WebSocket設定
+websocket:
+  reconnect_delay: 5               # 再接続遅延 (秒)
+  max_reconnect_attempts: 10       # 最大再接続試行回数
+  ping_interval: 30                # Pingインターバル (秒)
+
+# ログ設定
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Price logger settings
+price_logger:
+  price_change_threshold: 0.002    # 0.2% - デフォルト価格変更検出しきい値
+  low_liquidity_threshold: 0.0001  # 0.01% - 低流動性銘柄向け
+  gzip_flush_interval: 60  # 秒 - gzip圧縮時のflush間隔
+  file: "logs/arbitrage_bot.log"
+  max_size: 10485760               # 10MB
+  backup_count: 5
+
+# データベース設定（オプション）
+database:
+  enabled: false
+  type: "sqlite"                   # sqlite, postgresql, mongodb
+  url: "sqlite:///data/bot.db"
+  
+# アラート設定（オプション）
+alerts:
+  enabled: false
+  discord_webhook: ${DISCORD_WEBHOOK_URL}
+  slack_webhook: ${SLACK_WEBHOOK_URL}
+  
+# バックテスト設定
+backtest:
+  enabled: false
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+  initial_balance: 100000

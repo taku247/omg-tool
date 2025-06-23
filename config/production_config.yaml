@@ -1,0 +1,65 @@
+# アービトラージBot 本番環境設定ファイル
+
+# 開発・デバッグ設定
+development_mode: false             # 本番環境では実装ログ表示なし
+
+# 監視対象シンボル
+symbols:
+  - "BTC/USDT"
+  - "ETH/USDT"
+  - "SOL/USDT"
+  - "XEM/USDT"
+
+# アービトラージ検出設定
+arbitrage:
+  min_spread_threshold: 0.3        # 本番環境では少し厳しめの閾値
+  max_position_size: 5000          # 本番環境では保守的なサイズ
+  min_profit_threshold: 20         # 本番環境では高い利益閾値
+
+# リスク管理設定（本番環境用）
+risk:
+  max_position_size: 5000          # 保守的なポジションサイズ
+  max_total_exposure: 25000        # 保守的な総エクスポージャー
+  max_positions_per_symbol: 2      # 少ないポジション数
+  max_total_positions: 5           # 総ポジション数制限
+  max_slippage_percentage: 0.3     # 厳しいスリッページ制限
+  min_net_spread: 0.3              # 高い純スプレッド要求
+  max_position_duration: 43200     # 12時間で強制決済
+  cooldown_period: 600             # 10分間のクールダウン
+  max_daily_loss: 500              # 保守的な日次損失限度
+  max_drawdown: 2000               # 保守的なドローダウン限度
+  stop_loss_percentage: 1.5        # 厳しいストップロス
+  max_exchange_exposure: 10000     # 取引所リスク制限
+  min_exchange_balance: 2000       # 高い最小残高要件
+
+# 取引所設定
+exchanges:
+  hyperliquid:
+    testnet: false
+    api_key: ${HYPERLIQUID_API_KEY}
+    api_secret: ${HYPERLIQUID_API_SECRET}
+    
+  bybit:
+    testnet: false
+    api_key: ${BYBIT_API_KEY}
+    api_secret: ${BYBIT_API_SECRET}
+
+# WebSocket設定
+websocket:
+  reconnect_delay: 3
+  max_reconnect_attempts: 5
+  ping_interval: 30
+
+# ログ設定（本番環境用）
+logging:
+  level: WARNING                   # 本番環境では警告レベル以上のみ
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/arbitrage_bot_prod.log"
+  max_size: 52428800               # 50MB
+  backup_count: 10
+
+# アラート設定
+alerts:
+  enabled: true                    # 本番環境ではアラート有効
+  discord_webhook: ${DISCORD_WEBHOOK_URL}
+  slack_webhook: ${SLACK_WEBHOOK_URL}
