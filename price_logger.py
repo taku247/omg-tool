@@ -4,7 +4,7 @@ price_logger.py
 ===============
 リアルタイム価格ロガースクリプト。
 
-複数取引所（Hyperliquid / Bybit / Binance / Gate.io / Bitget / KuCoin）と
+複数取引所（Hyperliquid / Bybit / Binance / Gate.io / KuCoin）と
 複数銘柄（例: BTC, ETH, SOL など）のBid/Ask価格を1秒間隔でCSVに記録します。
 
 * 取引所固有のWebSocket実装は src/exchanges/ 以下にある各クラスを再利用
@@ -692,7 +692,7 @@ def parse_args():
     parser.add_argument(
         "--exchanges",
         nargs="+",
-        default=["Hyperliquid", "Bybit", "Gateio", "Bitget", "KuCoin"],
+        default=["Hyperliquid", "Bybit", "Gateio", "KuCoin"],
         help="使用する取引所"
     )
     parser.add_argument(

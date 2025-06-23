@@ -112,15 +112,6 @@ class BitgetExchange(ExchangeInterface):
                     "channel": "books",
                     "instId": bitget_symbol
                 }]
-            },
-            # 取引データ購読
-            {
-                "op": "subscribe",
-                "args": [{
-                    "instType": "mc",
-                    "channel": "trade",
-                    "instId": bitget_symbol
-                }]
             }
         ]
         

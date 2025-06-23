@@ -8,6 +8,8 @@ https://chatgpt.com/c/6858f9b7-7be0-8013-a319-9b8210faec7d
 
 main ブランチは <pj名> ディレクトリで使う。
 
+git worktree remove <ディレクトリパス>
+
 
 
 
@@ -277,4 +279,8 @@ timestamp,symbol,buy_exchange,sell_exchange,spread,profit
 
 TODO 滑り・手数料とか
 TODO websocketが切れることについてはどうなってるか。
-TODO bitgetでbidがaskのprice上回ることがある問題
+TODO bitgetでbidがaskのprice上回ることがある問題。また板も信用できないと。後回しで。
+https://chatgpt.com/c/68596f86-2d28-8013-a056-006faf3bdcb0
+TODO binanceは多すぎるので外した
+TODO rustとpythonで比較できないか
+TODO mexc追加する
