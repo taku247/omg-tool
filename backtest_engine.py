@@ -66,12 +66,57 @@ def load_csv(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def read_logs(start: datetime, end: datetime, symbols: List[str]) -> pd.DataFrame:
-    """指定期間の複数 CSV を結合して戻す"""
+def read_logs(start: datetime, end: datetime, symbols: List[str], use_synchronized: bool = True) -> pd.DataFrame:
+    """指定期間のCSVを読み込む（同期データまたは個別データ）"""
+    if use_synchronized:
+        return read_synchronized_logs(start, end, symbols)
+    else:
+        return read_individual_logs(start, end, symbols)
+
+
+def read_synchronized_logs(start: datetime, end: datetime, symbols: List[str]) -> pd.DataFrame:
+    """同期データセットを読み込む"""
     frames: List[pd.DataFrame] = []
     day = start.date()
     
-    print(f"📅 読み込み期間: {start.date()} 〜 {end.date()}")
+    print(f"📅 読み込み期間: {start.date()} 〜 {end.date()} (同期データセット)")
+    
+    while day <= end.date():
+        day_str = day.strftime("%Y%m%d")
+        sync_file = PROJECT_ROOT / "data" / "processed" / f"synchronized_prices_{day_str}.csv"
+        
+        if sync_file.exists():
+            df = load_csv(sync_file)
+            if not df.empty:
+                frames.append(df)
+        else:
+            print(f"⚠️ 同期データファイルが見つかりません: {sync_file}")
+                        
+        day += timedelta(days=1)
+    
+    if not frames:
+        raise FileNotFoundError(f"期間内に同期データファイルが見つかりませんでした: {start.date()} - {end.date()}")
+    
+    # 全てのフレームを結合し、時系列順にソート
+    combined_df = pd.concat(frames, ignore_index=True)
+    combined_df = combined_df.sort_values("timestamp").reset_index(drop=True)
+    
+    # 同期データを個別レコード形式に変換
+    converted_df = convert_synchronized_to_individual(combined_df, symbols)
+    
+    print(f"✅ {len(converted_df):,}レコード読み込み完了 (同期データセット)")
+    print(f"📊 取引所: {sorted(converted_df['exchange'].unique())}")
+    print(f"📊 シンボル: {sorted(converted_df['symbol'].unique())}")
+    
+    return converted_df
+
+
+def read_individual_logs(start: datetime, end: datetime, symbols: List[str]) -> pd.DataFrame:
+    """個別CSVファイルを読み込む（従来の方法）"""
+    frames: List[pd.DataFrame] = []
+    day = start.date()
+    
+    print(f"📅 読み込み期間: {start.date()} 〜 {end.date()} (個別ファイル)")
     
     while day <= end.date():
         day_str = day.strftime("%Y%m%d")
@@ -100,6 +145,41 @@ def read_logs(start: datetime, end: datetime, symbols: List[str]) -> pd.DataFram
     print(f"📊 シンボル: {sorted(combined_df['symbol'].unique())}")
     
     return combined_df
+
+
+def convert_synchronized_to_individual(sync_df: pd.DataFrame, symbols: List[str]) -> pd.DataFrame:
+    """同期データを個別レコード形式に変換"""
+    records = []
+    exchanges = ["bybit", "hyperliquid", "gateio", "kucoin"]
+    
+    for _, row in sync_df.iterrows():
+        timestamp = row["timestamp"]
+        
+        for exchange in exchanges:
+            for symbol in symbols:
+                bid_col = f"{exchange}_{symbol}_bid"
+                ask_col = f"{exchange}_{symbol}_ask"
+                last_col = f"{exchange}_{symbol}_last"
+                
+                if bid_col in row and ask_col in row:
+                    bid_val = row[bid_col]
+                    ask_val = row[ask_col]
+                    last_val = row[last_col] if last_col in row else None
+                    
+                    # 有効な価格データがある場合のみレコード追加
+                    if pd.notna(bid_val) and pd.notna(ask_val) and bid_val > 0 and ask_val > 0:
+                        records.append({
+                            "timestamp": timestamp,
+                            "exchange": exchange.title(),  # 大文字にして統一
+                            "symbol": symbol,
+                            "bid": bid_val,
+                            "ask": ask_val,
+                            "last": last_val if pd.notna(last_val) else None,
+                            "mark_price": None,
+                            "volume_24h": 0
+                        })
+    
+    return pd.DataFrame(records)
 
 
 def csv_row_to_ticker(row: pd.Series) -> Ticker:
@@ -326,6 +406,8 @@ def parse_cli() -> argparse.Namespace:
                        help="最大ポジションサイズUSD (デフォルト: 10000)")
     parser.add_argument("--min-profit", type=float, default=10, 
                        help="最小利益閾値USD (デフォルト: 10)")
+    parser.add_argument("--use-individual", action="store_true",
+                       help="個別CSVファイルを使用（デフォルト: 同期データセット使用）")
     
     return parser.parse_args()
 
@@ -396,9 +478,11 @@ async def main():
     
     # CSVログを読み込み
     try:
-        df = read_logs(start, end, args.symbols)
+        use_synchronized = not args.use_individual
+        df = read_logs(start, end, args.symbols, use_synchronized)
     except FileNotFoundError as e:
         print(f"❌ エラー: {e}")
+        print("💡 ヒント: --use-individual オプションで個別CSVファイルの使用も可能です")
         return
     
     # バックテストエンジンを設定
