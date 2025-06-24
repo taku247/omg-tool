@@ -276,6 +276,18 @@ class BacktestEngine:
         if symbol in self.open_positions:
             return
         
+        # エントリー時の実際の実行価格を取得
+        symbol_prices = self.detector.price_cache.get(symbol, {})
+        buy_exchange_ticker = symbol_prices.get(opportunity.buy_exchange)
+        sell_exchange_ticker = symbol_prices.get(opportunity.sell_exchange)
+        
+        if not buy_exchange_ticker or not sell_exchange_ticker:
+            return
+        
+        # 実際の執行価格（手数料・スリッページ考慮）
+        entry_buy_price = float(buy_exchange_ticker.ask) * (1 + self.slippage)  # askで買い + スリッページ
+        entry_sell_price = float(sell_exchange_ticker.bid) * (1 - self.slippage)  # bidで売り - スリッページ
+        
         # ポジション情報を記録
         position = {
             "symbol": symbol,
@@ -283,15 +295,17 @@ class BacktestEngine:
             "entry_spread": float(opportunity.spread_percentage),
             "buy_exchange": opportunity.buy_exchange,
             "sell_exchange": opportunity.sell_exchange,
-            "buy_price": float(opportunity.buy_price),
-            "sell_price": float(opportunity.sell_price),
-            "opportunity_id": opportunity.id
+            "entry_buy_price": entry_buy_price,    # 実際の買い執行価格
+            "entry_sell_price": entry_sell_price,  # 実際の売り執行価格
+            "opportunity_id": opportunity.id,
+            "max_adverse_spread": float(opportunity.spread_percentage)  # 最大逆行スプレッドを追跡
         }
         
         self.open_positions[symbol] = position
         print(f"📊 エントリー: {opportunity.id} | {symbol} | "
               f"{opportunity.buy_exchange}→{opportunity.sell_exchange} | "
-              f"スプレッド: {opportunity.spread_percentage:.3f}%")
+              f"スプレッド: {opportunity.spread_percentage:.3f}% | "
+              f"買い価格: {entry_buy_price:.4f} | 売り価格: {entry_sell_price:.4f}")
     
     async def _check_exit_positions(self, symbol: str, timestamp: pd.Timestamp):
         """ポジション決済をチェック"""
@@ -309,6 +323,10 @@ class BacktestEngine:
         
         if current_spread is None:
             return
+        
+        # 最大逆行スプレッドを更新（スプレッドが拡大した場合）
+        if abs(current_spread) > abs(position["max_adverse_spread"]):
+            position["max_adverse_spread"] = current_spread
         
         # 決済条件をチェック（スプレッドが閾値以下になった）
         if abs(current_spread) <= self.exit_threshold:
@@ -334,41 +352,81 @@ class BacktestEngine:
     async def _close_position(self, position: Dict[str, Any], exit_spread: float, timestamp: pd.Timestamp):
         """ポジションを決済"""
         symbol = position["symbol"]
+        buy_exchange = position["buy_exchange"]
+        sell_exchange = position["sell_exchange"]
         
-        # 利益計算
+        # エグジット時の実際の実行価格を取得
+        symbol_prices = self.detector.price_cache.get(symbol, {})
+        buy_exchange_ticker = symbol_prices.get(buy_exchange)
+        sell_exchange_ticker = symbol_prices.get(sell_exchange)
+        
+        if not buy_exchange_ticker or not sell_exchange_ticker:
+            # 価格データがない場合は0利益として処理
+            exit_buy_price = position["entry_buy_price"]
+            exit_sell_price = position["entry_sell_price"]
+        else:
+            # 実際の決済価格（手数料・スリッページ考慮）
+            exit_buy_price = float(buy_exchange_ticker.bid) * (1 - self.slippage)    # bidで売却 - スリッページ
+            exit_sell_price = float(sell_exchange_ticker.ask) * (1 + self.slippage)  # askで買戻し + スリッページ
+        
+        # エントリー価格
+        entry_buy_price = position["entry_buy_price"]
+        entry_sell_price = position["entry_sell_price"]
+        
+        # 各ポジションの損益計算（%）
+        long_pnl_pct = (exit_buy_price - entry_buy_price) / entry_buy_price * 100
+        short_pnl_pct = (entry_sell_price - exit_sell_price) / entry_sell_price * 100
+        
+        # 総損益（手数料控除前）
+        gross_profit_pct = long_pnl_pct + short_pnl_pct
+        
+        # 手数料控除（往復手数料を%で計算）
+        total_fee_pct = self.fee_rate * 4 * 100  # 4回の取引（買い・売り・決済買い・決済売り）
+        net_profit_pct = gross_profit_pct - total_fee_pct
+        
+        # 最大逆行幅を計算（エントリー時からの最大逆行）
+        max_adverse_spread = position["max_adverse_spread"]
         entry_spread = position["entry_spread"]
-        gross_profit = abs(entry_spread - exit_spread)  # 絶対値で利益幅を計算
-        
-        # 手数料・スリッページを控除
-        total_cost = (self.fee_rate * 2) + self.slippage  # 往復手数料 + スリッページ
-        net_profit = gross_profit - total_cost
+        adverse_movement = abs(max_adverse_spread) - abs(entry_spread)
         
         # トレード記録を作成
         trade = {
             "entry_time": position["entry_time"],
             "exit_time": timestamp,
             "symbol": symbol,
-            "buy_exchange": position["buy_exchange"],
-            "sell_exchange": position["sell_exchange"],
+            "buy_exchange": buy_exchange,
+            "sell_exchange": sell_exchange,
             "entry_spread": entry_spread,
             "exit_spread": exit_spread,
-            "gross_profit": gross_profit,
-            "net_profit": net_profit,
+            "max_adverse_spread": max_adverse_spread,
+            "adverse_movement": adverse_movement,
+            "entry_buy_price": entry_buy_price,
+            "entry_sell_price": entry_sell_price,
+            "exit_buy_price": exit_buy_price,
+            "exit_sell_price": exit_sell_price,
+            "long_pnl_pct": long_pnl_pct,
+            "short_pnl_pct": short_pnl_pct,
+            "gross_profit_pct": gross_profit_pct,
+            "net_profit_pct": net_profit_pct,
+            "total_fee_pct": total_fee_pct,
             "opportunity_id": position["opportunity_id"],
             "duration_minutes": (timestamp - position["entry_time"]).total_seconds() / 60
         }
         
         self.closed_trades.append(trade)
         
-        print(f"💰 決済: {symbol} | スプレッド: {entry_spread:.3f}% → {exit_spread:.3f}% | "
-              f"総利益: {gross_profit:.3f}% | 純利益: {net_profit:.3f}% | "
-              f"期間: {trade['duration_minutes']:.1f}分")
+        print(f"💰 決済: {symbol} | {buy_exchange}→{sell_exchange} | "
+              f"Long PnL: {long_pnl_pct:.3f}% | Short PnL: {short_pnl_pct:.3f}% | "
+              f"総利益: {gross_profit_pct:.3f}% | 純利益: {net_profit_pct:.3f}% | "
+              f"最大逆行: {adverse_movement:.3f}% | 期間: {trade['duration_minutes']:.1f}分")
         
         # ポジションを削除
         del self.open_positions[symbol]
     
     async def _force_close_all_positions(self, timestamp: pd.Timestamp):
         """未決済ポジションを強制決済"""
+        print(f"⚠️ 強制決済: {len(self.open_positions)}件のポジションを決済します")
+        
         for symbol in list(self.open_positions.keys()):
             position = self.open_positions[symbol]
             current_spread = self._compute_current_spread(
@@ -420,18 +478,27 @@ def print_statistics(trades_df: pd.DataFrame, args: argparse.Namespace):
     
     # 基本統計
     total_trades = len(trades_df)
-    winning_trades = len(trades_df[trades_df["net_profit"] > 0])
+    winning_trades = len(trades_df[trades_df["net_profit_pct"] > 0])
     win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
     
-    total_gross = trades_df["gross_profit"].sum()
-    total_net = trades_df["net_profit"].sum()
-    avg_gross = trades_df["gross_profit"].mean()
-    avg_net = trades_df["net_profit"].mean()
+    total_gross = trades_df["gross_profit_pct"].sum()
+    total_net = trades_df["net_profit_pct"].sum()
+    avg_gross = trades_df["gross_profit_pct"].mean()
+    avg_net = trades_df["net_profit_pct"].mean()
     
-    max_profit = trades_df["net_profit"].max()
-    max_loss = trades_df["net_profit"].min()
+    max_profit = trades_df["net_profit_pct"].max()
+    max_loss = trades_df["net_profit_pct"].min()
     
     avg_duration = trades_df["duration_minutes"].mean()
+    
+    # 手数料統計
+    avg_fee = trades_df["total_fee_pct"].mean()
+    total_fees = trades_df["total_fee_pct"].sum()
+    
+    # 逆行統計
+    avg_adverse = trades_df["adverse_movement"].mean()
+    max_adverse = trades_df["adverse_movement"].max()
+    min_adverse = trades_df["adverse_movement"].min()
     
     print("\n" + "=" * 60)
     print("📊 バックテスト結果サマリー")
@@ -447,8 +514,10 @@ def print_statistics(trades_df: pd.DataFrame, args: argparse.Namespace):
     print(f"✅ 勝率          : {win_rate:.1f}% ({winning_trades}/{total_trades})")
     print(f"💰 総利益(総計)  : {total_gross:.4f}% (総), {total_net:.4f}% (純)")
     print(f"📊 平均利益      : {avg_gross:.4f}% (総), {avg_net:.4f}% (純)")
+    print(f"💸 平均手数料    : {avg_fee:.4f}% | 総手数料: {total_fees:.4f}%")
     print(f"🚀 最大利益      : {max_profit:.4f}%")
     print(f"📉 最大損失      : {max_loss:.4f}%")
+    print(f"⚠️  平均逆行幅    : {avg_adverse:.4f}% | 最大逆行: {max_adverse:.4f}%")
     print(f"⏱️  平均保有時間  : {avg_duration:.1f}分")
     
     # シンボル別統計
@@ -457,8 +526,8 @@ def print_statistics(trades_df: pd.DataFrame, args: argparse.Namespace):
         symbol_trades = trades_df[trades_df["symbol"] == symbol]
         if not symbol_trades.empty:
             symbol_count = len(symbol_trades)
-            symbol_win_rate = (len(symbol_trades[symbol_trades["net_profit"] > 0]) / symbol_count) * 100
-            symbol_profit = symbol_trades["net_profit"].sum()
+            symbol_win_rate = (len(symbol_trades[symbol_trades["net_profit_pct"] > 0]) / symbol_count) * 100
+            symbol_profit = symbol_trades["net_profit_pct"].sum()
             print(f"   {symbol}: {symbol_count}件, 勝率{symbol_win_rate:.1f}%, 利益{symbol_profit:.3f}%")
     
     print("=" * 60)
