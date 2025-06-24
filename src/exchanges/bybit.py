@@ -14,6 +14,7 @@ from ..interfaces.exchange import (
     ExchangeInterface, Ticker, OrderBook, Order, Balance, Position,
     OrderSide, OrderType, OrderStatus
 )
+from ..utils.fee_utils import get_exchange_fees
 
 logger = logging.getLogger(__name__)
 
@@ -416,11 +417,7 @@ class BybitExchange(ExchangeInterface):
         
     async def get_trading_fees(self, symbol: str) -> Dict[str, Decimal]:
         """取引手数料を取得"""
-        # Bybitの一般的な手数料（実際のAPIから取得すべき）
-        return {
-            "maker_fee": Decimal("0.0001"),  # 0.01% 
-            "taker_fee": Decimal("0.0006")   # 0.06%
-        }
+        return get_exchange_fees("bybit")
         
     @property
     def is_connected(self) -> bool:

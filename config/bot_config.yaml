@@ -49,27 +49,50 @@ exchanges:
     testnet: false
     api_key: ${HYPERLIQUID_API_KEY}
     api_secret: ${HYPERLIQUID_API_SECRET}
+    fees:
+      maker: 0.00013              # 0.013% (rebate: -0.0001%)
+      taker: 0.000389             # 0.0389%
     
   bybit:
     testnet: false
     api_key: ${BYBIT_API_KEY}
     api_secret: ${BYBIT_API_SECRET}
+    fees:
+      maker: 0.0001              # 0.01%
+      taker: 0.0006              # 0.06%
     
   bitget:
     testnet: false
     api_key: ${BITGET_API_KEY}
     api_secret: ${BITGET_API_SECRET}
+    fees:
+      maker: 0.0002              # 0.02%
+      taker: 0.0006              # 0.06%
     
   gate:
     testnet: false
     api_key: ${GATE_API_KEY}
     api_secret: ${GATE_API_SECRET}
+    fees:
+      maker: 0.0002              # 0.02%
+      taker: 0.0005              # 0.05%
     
   kucoin:
     testnet: false
     api_key: ${KUCOIN_API_KEY}
     api_secret: ${KUCOIN_API_SECRET}
     passphrase: ${KUCOIN_PASSPHRASE}
+    fees:
+      maker: 0.0002              # 0.02%
+      taker: 0.0006              # 0.06%
+
+  binance:
+    testnet: false
+    api_key: ${BINANCE_API_KEY}
+    api_secret: ${BINANCE_API_SECRET}
+    fees:
+      maker: 0.0002              # 0.02%
+      taker: 0.0004              # 0.04%
 
 # WebSocket設定
 websocket:
