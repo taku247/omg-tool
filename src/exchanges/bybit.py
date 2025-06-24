@@ -10,6 +10,14 @@ from decimal import Decimal
 from datetime import datetime
 import aiohttp
 
+# CCXT for order execution
+try:
+    import ccxt.async_support as ccxt
+    CCXT_AVAILABLE = True
+except ImportError:
+    CCXT_AVAILABLE = False
+    logger.warning("CCXT library not available. Order execution will be limited.")
+
 from ..interfaces.exchange import (
     ExchangeInterface, Ticker, OrderBook, Order, Balance, Position,
     OrderSide, OrderType, OrderStatus
@@ -43,6 +51,24 @@ class BybitExchange(ExchangeInterface):
         # データキャッシュ
         self.ticker_cache = {}
         self.orderbook_cache = {}
+        
+        # CCXT取引所インスタンス（注文実行用）
+        self.ccxt_exchange = None
+        if CCXT_AVAILABLE and api_key and api_secret:
+            try:
+                self.ccxt_exchange = ccxt.bybit({
+                    'apiKey': api_key,
+                    'secret': api_secret,
+                    'sandbox': testnet,
+                    'enableRateLimit': True,
+                    'options': {
+                        'defaultType': 'linear',  # perpetual futures
+                    }
+                })
+                logger.info("Bybit CCXT exchange initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize Bybit CCXT exchange: {e}")
+                self.ccxt_exchange = None
         
     async def connect_websocket(self, symbols: List[str]) -> None:
         """WebSocket接続を確立"""
@@ -388,33 +414,287 @@ class BybitExchange(ExchangeInterface):
                          order_type: OrderType = OrderType.MARKET,
                          price: Optional[Decimal] = None,
                          client_order_id: Optional[str] = None) -> Order:
-        """注文を実行（実装予定）"""
-        raise NotImplementedError("Order placement not yet implemented")
+        """注文を実行"""
+        if not CCXT_AVAILABLE or not self.ccxt_exchange:
+            raise NotImplementedError("CCXT library not available or exchange not authenticated")
+            
+        try:
+            # Bybitシンボル形式に変換
+            bybit_symbol = self._convert_symbol_to_bybit(symbol)
+            
+            # 注文パラメータ構築
+            order_params = {
+                'symbol': bybit_symbol,
+                'type': order_type.value.lower(),
+                'side': side.value.lower(),
+                'amount': float(quantity)
+            }
+            
+            # 価格設定
+            if order_type == OrderType.LIMIT:
+                if price is None:
+                    raise ValueError("Price is required for limit orders")
+                order_params['price'] = float(price)
+            elif order_type == OrderType.MARKET:
+                # マーケット注文では価格は不要
+                pass
+            else:
+                raise NotImplementedError(f"Order type {order_type} not supported yet")
+                
+            # クライアント注文ID
+            if client_order_id:
+                order_params['params'] = {'clientOrderId': client_order_id}
+                
+            # 注文実行
+            logger.info(f"Placing Bybit order: {order_params}")
+            result = await self.ccxt_exchange.create_order(**order_params)
+            
+            # CCXTの結果をOrderオブジェクトに変換
+            order = self._convert_ccxt_order_to_order(result, symbol, side, order_type)
+            
+            logger.info(f"Bybit order placed successfully: {order.id}")
+            return order
+            
+        except Exception as e:
+            logger.error(f"Failed to place Bybit order: {e}")
+            raise
         
     async def cancel_order(self, order_id: str, symbol: str) -> bool:
-        """注文をキャンセル（実装予定）"""
-        raise NotImplementedError("Order cancellation not yet implemented")
+        """注文をキャンセル"""
+        if not CCXT_AVAILABLE or not self.ccxt_exchange:
+            raise NotImplementedError("CCXT library not available or exchange not authenticated")
+            
+        try:
+            # Bybitシンボル形式に変換
+            bybit_symbol = self._convert_symbol_to_bybit(symbol)
+            
+            # 注文キャンセル実行
+            result = await self.ccxt_exchange.cancel_order(order_id, bybit_symbol)
+            
+            # キャンセル成功の判定
+            is_cancelled = result.get('status') in ['canceled', 'cancelled']
+            
+            if is_cancelled:
+                logger.info(f"Bybit order {order_id} cancelled successfully")
+            else:
+                logger.warning(f"Bybit order {order_id} cancellation status: {result.get('status')}")
+                
+            return is_cancelled
+            
+        except Exception as e:
+            logger.error(f"Failed to cancel Bybit order {order_id}: {e}")
+            return False
         
     async def get_order(self, order_id: str, symbol: str) -> Order:
-        """注文情報を取得（実装予定）"""
-        raise NotImplementedError("Get order not yet implemented")
+        """注文情報を取得"""
+        if not CCXT_AVAILABLE or not self.ccxt_exchange:
+            raise NotImplementedError("CCXT library not available or exchange not authenticated")
+            
+        try:
+            # Bybitシンボル形式に変換
+            bybit_symbol = self._convert_symbol_to_bybit(symbol)
+            
+            # 注文情報取得
+            result = await self.ccxt_exchange.fetch_order(order_id, bybit_symbol)
+            
+            # CCXTの結果をOrderオブジェクトに変換
+            order = self._convert_ccxt_order_to_order(result, symbol)
+            
+            return order
+            
+        except Exception as e:
+            logger.error(f"Failed to get Bybit order {order_id}: {e}")
+            raise
         
     async def get_open_orders(self, symbol: Optional[str] = None) -> List[Order]:
-        """未約定注文一覧を取得（実装予定）"""
-        raise NotImplementedError("Get open orders not yet implemented")
+        """未約定注文一覧を取得"""
+        if not CCXT_AVAILABLE or not self.ccxt_exchange:
+            raise NotImplementedError("CCXT library not available or exchange not authenticated")
+            
+        try:
+            # 未約定注文取得
+            if symbol:
+                bybit_symbol = self._convert_symbol_to_bybit(symbol)
+                results = await self.ccxt_exchange.fetch_open_orders(bybit_symbol)
+            else:
+                results = await self.ccxt_exchange.fetch_open_orders()
+                
+            # CCXTの結果をOrderオブジェクトのリストに変換
+            orders = []
+            for result in results:
+                order_symbol = self._convert_symbol_from_bybit(result['symbol'])
+                order = self._convert_ccxt_order_to_order(result, order_symbol)
+                orders.append(order)
+                
+            return orders
+            
+        except Exception as e:
+            logger.error(f"Failed to get Bybit open orders: {e}")
+            raise
         
     async def get_balance(self) -> Dict[str, Balance]:
-        """残高を取得（実装予定）"""
-        raise NotImplementedError("Get balance not yet implemented")
+        """残高を取得"""
+        if not CCXT_AVAILABLE or not self.ccxt_exchange:
+            raise NotImplementedError("CCXT library not available or exchange not authenticated")
+            
+        try:
+            # 残高取得
+            balance_data = await self.ccxt_exchange.fetch_balance()
+            balances = {}
+            
+            for asset, balance_info in balance_data.items():
+                if asset in ['info', 'free', 'used', 'total']:
+                    continue  # CCXTの特殊キーをスキップ
+                    
+                if isinstance(balance_info, dict):
+                    free = Decimal(str(balance_info.get('free', 0)))
+                    used = Decimal(str(balance_info.get('used', 0)))
+                    total = Decimal(str(balance_info.get('total', 0)))
+                    
+                    if total > 0:  # 残高がある資産のみ
+                        balances[asset] = Balance(
+                            asset=asset,
+                            free=free,
+                            locked=used,
+                            total=total
+                        )
+                        
+            return balances
+            
+        except Exception as e:
+            logger.error(f"Failed to get Bybit balance: {e}")
+            raise
         
     async def get_position(self, symbol: str) -> Optional[Position]:
-        """ポジション情報を取得（実装予定）"""
-        raise NotImplementedError("Get position not yet implemented")
+        """ポジション情報を取得"""
+        positions = await self.get_positions()
+        for position in positions:
+            if position.symbol == symbol:
+                return position
+        return None
         
     async def get_positions(self) -> List[Position]:
-        """全ポジション情報を取得（実装予定）"""
-        raise NotImplementedError("Get positions not yet implemented")
+        """全ポジション情報を取得"""
+        if not CCXT_AVAILABLE or not self.ccxt_exchange:
+            raise NotImplementedError("CCXT library not available or exchange not authenticated")
+            
+        try:
+            # ポジション取得
+            positions_data = await self.ccxt_exchange.fetch_positions()
+            positions = []
+            
+            for pos_data in positions_data:
+                # アクティブなポジションのみ
+                if pos_data.get('size', 0) == 0:
+                    continue
+                    
+                symbol = self._convert_symbol_from_bybit(pos_data['symbol'])
+                side = OrderSide.BUY if pos_data['side'] == 'long' else OrderSide.SELL
+                size = Decimal(str(abs(pos_data['size'])))
+                entry_price = Decimal(str(pos_data.get('entryPrice', 0)))
+                mark_price = Decimal(str(pos_data.get('markPrice', entry_price)))
+                unrealized_pnl = Decimal(str(pos_data.get('unrealizedPnl', 0)))
+                
+                position = Position(
+                    symbol=symbol,
+                    side=side,
+                    size=size,
+                    entry_price=entry_price,
+                    mark_price=mark_price,
+                    unrealized_pnl=unrealized_pnl,
+                    realized_pnl=Decimal('0'),  # CCXTでは別途取得が必要
+                    timestamp=int(datetime.now().timestamp() * 1000)
+                )
+                positions.append(position)
+                
+            return positions
+            
+        except Exception as e:
+            logger.error(f"Failed to get Bybit positions: {e}")
+            raise
         
+    def _convert_ccxt_order_to_order(self, ccxt_order: Dict, symbol: str, 
+                                    side: Optional[OrderSide] = None, 
+                                    order_type: Optional[OrderType] = None) -> Order:
+        """CCXTの注文データをOrderオブジェクトに変換"""
+        try:
+            # CCXTから必要な情報を抽出
+            order_id = str(ccxt_order['id'])
+            
+            # サイドの変換
+            if side is None:
+                side_str = ccxt_order.get('side', '').upper()
+                side = OrderSide.BUY if side_str == 'BUY' else OrderSide.SELL
+                
+            # 注文タイプの変換
+            if order_type is None:
+                type_str = ccxt_order.get('type', '').upper()
+                if type_str == 'MARKET':
+                    order_type = OrderType.MARKET
+                elif type_str == 'LIMIT':
+                    order_type = OrderType.LIMIT
+                else:
+                    order_type = OrderType.LIMIT  # デフォルト
+                    
+            # ステータスの変換
+            status_str = ccxt_order.get('status', '').lower()
+            status_map = {
+                'open': OrderStatus.NEW,
+                'pending': OrderStatus.NEW,
+                'closed': OrderStatus.FILLED,
+                'filled': OrderStatus.FILLED,
+                'canceled': OrderStatus.CANCELLED,
+                'cancelled': OrderStatus.CANCELLED,
+                'expired': OrderStatus.EXPIRED
+            }
+            status = status_map.get(status_str, OrderStatus.NEW)
+            
+            # 数量・価格の変換
+            quantity = Decimal(str(ccxt_order.get('amount', 0)))
+            filled = Decimal(str(ccxt_order.get('filled', 0)))
+            remaining = quantity - filled
+            
+            price = None
+            if ccxt_order.get('price'):
+                price = Decimal(str(ccxt_order['price']))
+                
+            # 手数料
+            fee = None
+            if ccxt_order.get('fee') and ccxt_order['fee'].get('cost'):
+                fee = Decimal(str(ccxt_order['fee']['cost']))
+                
+            order = Order(
+                id=order_id,
+                symbol=symbol,
+                side=side,
+                type=order_type,
+                price=price,
+                quantity=quantity,
+                filled=filled,
+                remaining=remaining,
+                status=status,
+                timestamp=int(ccxt_order.get('timestamp', datetime.now().timestamp() * 1000)),
+                client_order_id=ccxt_order.get('clientOrderId'),
+                fee=fee
+            )
+            
+            return order
+            
+        except Exception as e:
+            logger.error(f"Error converting CCXT order to Order: {e}")
+            # フォールバック用の基本注文オブジェクトを返す
+            return Order(
+                id=str(ccxt_order.get('id', 'unknown')),
+                symbol=symbol,
+                side=side or OrderSide.BUY,
+                type=order_type or OrderType.MARKET,
+                quantity=Decimal(str(ccxt_order.get('amount', 0))),
+                filled=Decimal('0'),
+                remaining=Decimal(str(ccxt_order.get('amount', 0))),
+                status=OrderStatus.NEW,
+                timestamp=int(datetime.now().timestamp() * 1000)
+            )
+    
     async def get_trading_fees(self, symbol: str) -> Dict[str, Decimal]:
         """取引手数料を取得"""
         return get_exchange_fees("bybit")
